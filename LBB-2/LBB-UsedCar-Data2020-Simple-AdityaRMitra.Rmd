@@ -1,0 +1,428 @@
+---
+title: "Harga Kendaraan Bekas Di Indonesia Per 2020"
+author: "Aditya R. Mitra"
+date: "`r Sys.Date()`"
+output: 
+ html_document:
+   toc: true
+   toc_float: true
+   highlight: zenburn
+   df_print: paged
+   theme: flatly
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduksi
+Dalam tugas LBB ini, fokus dari visualisasi data adalah pada persoalan seputar harga kendaraan bekas di Indonesia yang tersedia di tahun 2020. Data harga bekas kendaraan ini diambil dari [AtapData.ai](https://atapdata.ai/dataset/231/harga_mobil_bekas).
+
+Umumnya minat orang dalam mengkaji data kendaraan bekas adalah pada harga yang dikaitkan dengan jarak tempuh dan konsumsi bahan bakar. Dalam tugas ini, eksplorasi dilakukan pada faktor warna dan persepsi umum tentang merek-merek kendaraan buatan negara-negara di Eropa sebagai suatu kelompok dan merek-merek kendaraan buatan negara Jepang sebagai kelompok yang lain. Merek-merek kendaraan dari negara lain yang tidak mendominasi pasar seperti buatan China dan Korea akan dieksklusi dari bahasan di sini. 
+
+Eksplorasi data harga jual kendaraan bekas ini dapat digunakan oleh pemilik show room kendaraan bekas yang tengah memikirkan untuk menambah koleksi barang yang akan dijual atau mereka yang tengah menimbang-nimbang kendaraan bekas dengan melakukan perbandingan antara kendaraan bekas buatan negara-negara di Eropa atau kendaraan buatan Jepang dimana harga tidak menjadi satu-satunya faktor penentu. 
+
+# Pustaka Fungsi
+Untuk keperluan penyiapan data (_data wrangling_) dan pembangkitan grafik, pustaka-pustaka fungsi yang digunakan adalah sebagai berikut:
+
+```{r "chunk-lib", results = "hide"}
+library(dplyr)
+library(readr)
+library(tidyverse)
+library(ggplot2)
+library(ggthemes)
+library(glue)
+library(scales)
+library(forcats)
+```
+
+```{r "chunk-format", echo = FALSE }
+format_numb <- scales::label_comma(accuracy = .2, big.mark = ".", decimal.mark = ",")
+format_numb_int <- scales::label_comma(accuracy = NULL, big.mark = ",", decimal.mark = ".", trim = T)
+```
+
+
+# Penyiapan Data
+Untuk dapat bekerja dengan dataset yang ada, kita perlu memastikan terlebih dulu bahwa data dapat dibaca. Mengikuti pembacaan ada sejumlah tindakan berkaitan dengan pembersihan data (_data wrangling_) yang akan dilakukan.
+
+## Pembacaan Data
+Data mengenai harga jual kendaraan bekas yang diunduh dari atapdata.id dinilai masih _up-to-date_ mengingat data tersebut dikoleksi di tahun 2020. Berkaitan dengan itu eksplorasi yang dilakukan menggunakan tahun 2020 sebagai tahun analisa. 
+
+Dari dataset yang ada, data yang digunakan adalah "cars_train_new.csv". Dasar pertimbangan pemilihan tersebut adalah sederhana saja, yaitu berdasarkan ukuran file yang terbesar saja. Data semula memang dirancang untuk kebutuhan pelatihan (_training_) dan pengujian (_testing_) dalam konteks pembelajaran mesin (_machine learning_)
+
+```{r "chunk-read", results = "hide"}
+usedCars_orig = read.csv("dataset231/cars_train_new.csv")
+```
+
+## Struktur Dataset
+
+Untuk mengetahui struktur data yang ada
+
+```{r}
+str(usedCars_orig)
+```
+
+```{r echo=FALSE, results="hide"}
+col_Names = colnames(usedCars_orig)
+print(length(col_Names))
+```
+Dari hasil di atas diketahui ada 15 kolom dengan masing-masing tipe data. Untuk keperluan pembahasan lebih lanjut, dua kolom akan didrop, yaitu kolom title dan kolom image. Drop kedua kolom akan dilakukan setelah pemeriksaan kesesuaian tipe data.
+
+## Pemeriksaan Tipe Data
+Dari hasil pemeriksaan kesesuaian tipe, tipe dari kolom year, yaitu integer, tidak akan diubah ke format date (tanggal) mengingat granularitasnya adalah tahunan. Dalam dataset memang tidak tersedia informasi detil meliputi hari dan bulan dari tanggal manufakturisasi atau memang dalam hal ini tidak akan dilakukan penelusuran hingga detil seperti itu dari tanggal pembuatan masing-masing kendaraan. Dalam beberapa hal informasi bulan mempengaruhi preferensi pembeli kendaraan baru, namun tidak demikiannya untuk kendaraan bekas secara umum. 
+
+## Mengabaikan Baris dengan Missing Value
+Kita juga ingin memastikan tidak ada _missing value_ (NA) dalam dataset yang dikaji. 
+Untuk itu kita hilangkan semua baris yang mengandung _missing value_ bila terdeteksi. 
+
+```{r}
+usedCars_orig = na.omit(usedCars_orig) 
+```
+
+## Drop Kolom
+Setelah memastikan tidak ada kemunculan _missing value_ pada sebarang baris, kita akan mendrop dua kolom sebagaimana disinggung sebelumnya:
+
+```{r}
+usedCars_orig = usedCars_orig %>% subset(select = -c(title, image))
+str(usedCars_orig)
+# banyak kolom setelah melakukan drop
+length(colnames(usedCars_orig))
+```
+
+## Mutasi Kolom
+Secara khusus, usia kendaraan bekas itu menarik untuk dikaji. Karenanya kita tambahkan satu kolom yang mencatat usia kendaraan dengan patokan tahun 2020 (saat data kendaraan bekas ini dpersiapkan). Selain itu kita juga mencoba mengkategorikan usia pemakaian yang dikatakan muda, sedang dan tua. Kita definisikan begitu saja bahwa usia kendaraan kurang atau sama dengan 3 tahun disebut muda (Low), usia kendaraan antara 3 dan 10 tahun dikatakan sedang (Medium), dan usia kendaraan di atas 10 tahun disebut sebagai usia tua (High). 
+
+```{r}
+usedCars_orig = 
+   usedCars_orig %>% mutate(age = as.integer(2020 - year))
+usedCars_orig =
+   usedCars_orig %>% mutate(age_Cat = if_else(age <= 3, "Low", if_else(age > 3 & age <=10, "Medium", "High")))  
+
+usedCars_orig %>% select(brand, age, age_Cat) %>% head(10)
+```
+Sebagai kasus contoh, misalkan kita ingin mengetahui usia kendaraan merek Toyota atau Suzuki yang lebih atau sama dengan 5 tahun
+
+```{r}
+usedCars_orig %>% 
+   filter(brand == "Toyota" | brand == "Suzuki", age >= 5) %>% 
+   select(brand, model, age) %>% 
+   head(15)
+```
+## Merek Kendaraan yang Unik
+Sebelum membatasi kajian pada merek-merek kendaraan buatan negara-negara di Eropa dan Jepang, ada baiknya kita mengetahui merek-merek kendaraan yang unik dalam dataset yang ada
+
+```{r}
+uniqueBr <- unique(usedCars_orig$brand)
+# banyak merek kendaraan yang unik
+length(uniqueBr)
+# urut merek kendaraan secara alfabetik
+sort(uniqueBr, decreasing = F)
+```
+
+Tampak bahwa ada 59 merk kendaraan yang unik. Namun karena ada kemunculan beberapa merek yang tidak tepat, kita perbaiki beberapa value pada kolom brand, yaitu merek "Elf" dan merek "Mitsubishi Colt" dimana sebenarnya "Elf" dan "Colt" adalah model dari merek "Isuzu" dan "Mitsubishi". 
+
+```{r}
+usedCars_orig["brand"][usedCars_orig["brand"] == "Elf"] <- "Isuzu"
+usedCars_orig["brand"][usedCars_orig["brand"] == "Mitsubishi Colt"] <- "Mitsubishi"
+```
+
+
+```{r , echo=FALSE, results="hide"}
+uniqueBr <- unique(usedCars_orig$brand)
+# banyak merek kendaraan yang unik
+length(uniqueBr)
+```
+
+Setelah koreksi, kini ada 57 merek kendaraan yang unik. Ke-57 merek kendaraan tersebut akan diklasifikasikan menurut dua kelompok. Kelompok pertama adalah kelompok merek-merek kendaraan yang berasal dari negara-negara di Eropa dan kelompok kedua adalah merek kendaraan yang khusus dari negara Jepang saja.
+
+## Pengelompokan Merek
+Sebelum mengelompokan merek-merek kendaraan berdasarkan negara pembuatnya, kita akan kelompokkan data berdasarkan mereknya terlebih dulu:
+
+```{r}
+usedCars_grBr = usedCars_orig %>% 
+   group_by(brand) %>% 
+   arrange(brand)
+head(usedCars_grBr)
+tail(usedCars_grBr)
+```
+
+Selanjutnya kita melakukan pengelompokan kendaraan yang diproduksi di Eropa dan di Jepang sebagai berikut:
+
+```{r , results="hide"}
+euroCars = c("Abart", "Aston Martin", "Audi", "Bentley", "BMW", "Ferrari", "Fiat", "Jaguar", "Lamborghini", "Land Rover", "Maserati", "McLaren", "Mercedes-Benz", "MINI", "Opel", "Peugeot", "Porsche", "Renault", "Rolls-Royce", "Rover", "smart", "Volkswagen", "Volvo")
+length(euroCars)
+
+japaneseCars = c("Daihatsu", "Datsun", "Elf", "Hino", "Honda", "Infiniti", "Isuzu", "Lexus", "Mazda", "Mitsubishi", "Mitsubishi Colt", "Nissan", "Subaru", "Suzuki", "Toyota", "UD TRUCKS")
+length(japaneseCars)
+
+```
+
+di mana ada 23 merek kendaraan yang diproduksi di beberapa negara di Eropa dan ada 16 merek kendaraan yang diproduksi di Jepang.
+
+Berikutnya kita akan persempit bahasan pada kendaraan-kendaraan buatan negara-negara di Eropa dan Jepang saja:
+
+```{r , results="hide"}
+usedCars_EuroJapan = usedCars_grBr %>% 
+   filter(brand %in% euroCars | brand %in% japaneseCars)
+head(usedCars_EuroJapan)
+```
+
+Bila kita ingin mengetahui usia kendaraan yang sudah lebih atau sama dengan 5 tahun (berarti sebagian masuk kategori medium dan high) maka dengan menyaring data kita akan memperoleh hasil berikut
+
+```{r}
+usedCars_EuroJapan_over5 = 
+   usedCars_EuroJapan %>% 
+   filter(age >= 5) 
+```
+
+Bila kita ingin mengetahui secara spesifik kendaraan merek Audi yang sudah berusia sama atau lebih dari 5 tahun:
+
+```{r}
+usedCars_EuroJapan_over5 %>%
+   filter(brand == "Audi") %>%
+   select(brand, model, year, age) %>%
+   head(10)
+```
+
+# Kasus 
+
+Setelah data dipersiapkan, khususnya dengan memfokuskan bahasan pada dua kelompok negara pembuat kendaraan, kita akan melakukan eksplorasi atas sejumlah kasus sebagai berikut. 
+
+## Kasus 1
+Kita mengetahui bahwa warna putih sempat menjadi trend dalam beberapa tahun belakangan ini. Bagaimana halnya dengan harga kendaraan bekas warna putih yang usianya sudah lebih dari 5 tahun? Pertanyaan tersebut dapat dirumuskan kembali sebagai: 
+"Apakah kendaraan bekas Eropa warna putih dengan usia lebih dari 5 tahun mempunyai harga jual yang secara rata-rata lebih tinggi dari warna-warna lainnya?"
+
+Untuk mendapatkan jawaban dari pertanyaan tersebut, kita perlu menyaring data kendaraan Eropa dengan warna putih. Lalu kita dapat menghitung rata-rata dari seluruh harga jual kendaraan buatan Eropa. Namun kita juga mengetahui bahwa sejumlah kendaraan buatan Eropa memiliki harga-harga yang sangat tinggi. Untuk pertimbangan tersebut kita akan menggunakan statistik median. Dengan diagram boxplot kita bisa mendapatkan sebaran harga kendaraan bekas dimaksud. 
+
+```{r}
+usedCars_Euro_white = usedCars_EuroJapan_over5 %>%
+   filter(brand %in% euroCars) %>%
+   filter(color == "Putih")
+usedCars_Euro_white_mean = usedCars_Euro_white %>%
+   group_by(brand) %>%
+   summarise(price_mean = mean(price)) %>%
+   arrange(brand)
+```
+
+
+```{r}
+plot1 = ggplot(
+   data = usedCars_Euro_white, 
+   aes(x = brand, y = price / 1000000, fill = brand)) +
+   geom_boxplot(outlier.colour="red", 
+                outlier.shape=16,
+                outlier.size=2, notch=FALSE) +
+   coord_flip() +
+   labs(title="Harga Rata-Rata Kendaraan Bekas Eropa", 
+        subtitle = "Warna Putih & Usia 5 Tahun Keatas",
+        x="Merek", fill = "Merek (Brand)") +
+   scale_y_continuous(name="Harga per jutaan", 
+                      breaks = pretty(c(0,7000), n=14), 
+                      limits=c(0, 7000)) +
+   theme(legend.position = "bottom")
+plot1   
+```
+
+
+Dari sebaran di atas, dapat dilihat beberapa merek kendaraan mempunyai rentang nilai (harga) yang sangat lebar dan beberapa merek mempunyai pencilan yang cukup ekstrem, seperti Porsche, Mercedes Benz dan Lamborghini. Menggunakan istilah yang populer di kalangan masyarakat, rentang yang lebar ditambah pencilan dikenal sebagai harga gelap. 
+
+Untuk memeriksa apakah ada perbedaan besar antara rata-rata harga jual dari kendaraan-kendaraan tersebut dengan median harga jual, berikut ditunjukkan perbedaan keduanya melalui grafik.
+
+```{r}
+usedCars_Euro_mean = usedCars_EuroJapan_over5 %>%
+   filter(brand %in% euroCars) %>%
+   filter(color == "Putih") %>%
+   group_by(brand) %>%
+   summarise(price_mean = mean(price)) %>%
+   arrange(brand)
+```
+
+```{r}
+usedCars_Euro_med = usedCars_EuroJapan_over5 %>%
+   filter(brand %in% euroCars) %>%
+   filter(color == "Putih") %>%
+   group_by(brand) %>%
+   summarise(price_med = median(price)) %>%
+   arrange(brand)
+```
+
+```{r}
+usedCars_Euro_mean_med = cbind(usedCars_Euro_mean, usedCars_Euro_med)
+usedCars_Euro_mean_med = 
+   usedCars_Euro_mean_med[, !duplicated(colnames(usedCars_Euro_mean_med))]  
+usedCars_Euro_mean_med %>% head()
+```
+
+```{r}
+plot2 = usedCars_Euro_mean_med %>% 
+   pivot_longer(cols = c(price_mean, price_med)) %>%
+   ggplot(aes(x = value/1000000, y = brand)) +
+   geom_bar(aes(fill = name), width = 0.8, stat = "identity", position = "dodge") +
+   labs(title="Rata-Rata Dan Median Harga Kendaraan Bekas Eropa", 
+        subtitle = "Warna Putih & Usia 5 Tahun Keatas",
+        x="Harga dalam Ribuan", y="Merek", fill = "Rata-rata dan Median") +
+   scale_x_continuous(name="Harga dalam ribuan",
+                      breaks = pretty(c(0,6000), n=12), 
+                      limits=c(0, 6000)) +
+   theme(legend.position = "bottom")
+plot2
+```
+
+
+Secara umum sangat logis terdapat perbedaan antara rata-rata dan median harga jual. Namun, kita tertarik dengan perbedaan yang ekstrem. Dari grafik terlihat bahwa hal tersebut terjadi pada merek Lamborghini. Tampak juga bahwa median cenderung mendekati Q3. Dapat disimpulkan bahwa harga kebanyakan model Lamborghini memang fantastis.
+
+
+## Kasus 2
+Bagaimana halnya dengan ketersediaan kendaraan Eropa yang berusia lebih dari 3 tahun, yaitu termasuk kategori usia medium dan high, antara warna putih dan selain putih? Kita eksplorasi pertanyaan ini sebagai berikut:
+
+```{r}
+usedCars_Euro_White_NonWhite <- usedCars_EuroJapan %>% 
+  filter(brand %in% euroCars) %>%
+  filter(age_Cat %in% c("Medium", "High")) %>%
+  group_by(brand) %>% 
+  summarise(white_col = sum(color == "Putih"),
+            non_white_col = sum (color != "Putih")) %>% 
+  arrange(desc(white_col)) 
+  
+usedCars_Euro_White_NonWhite %>% head()
+```
+Dari tabel terlihat bahwa kendaraan bermerek Mercedes Benz yang paling banyak berwarna putih. Untuk kendaraan berlogo bintang dengan usia lebih dari 3 tahun, terdapat 633 kendaraan berwarna putih dan 2083 kendaraan berwarna selain putih. Dengan demikian secara persentase kendaraan Mercedes yang usianya menengah dan tinggi berkisar 23,30%. Bilangan yang lumayan besar. Sementara bila dibandingkan dengan BMW maka banyak kendaraan bermerek ini yang usianya serupa adalah sekitar 32,10%. Dari segi jumlah total memang lebih banyak kendaraan Mercedes Benz yang berwarna putih namun secara persentase, lebih banyak kendaraan BMW yang berwarna putih. Dengan kata lain, secara tak langsung dapat dikatakan bahwa BMW warna putih cukup menjadi warna favorit setidaknya bagi pemilik showroom dibanding warna-warna lainnya.  
+
+
+```{r}
+plot3 = usedCars_Euro_White_NonWhite %>% 
+   pivot_longer(cols = c(non_white_col, white_col)) %>%
+   ggplot(aes(x = value, y = brand)) +
+   geom_col(aes(fill = name), width = 0.8, position = "dodge") +
+   labs(title="Jumlah Kendaraan Bekas Eropa", subtitle="Warna Putih vs Non Putih, Usia >3 tahun", x = "Total", y = "Merek", fill = "Warna Kendaraan")
+
+plot3
+```
+
+Dari grafik tampak bahwa kendaraan bekas warna putih dari segi jumlah banyak muncul pada merek Mercedes Benz, BMW, Land Rover, Porsche dan Volkswagen. Bagi penggemar kendaraan berwarna putih keempat merek tersebut dapat menjadi pilihan. Untuk Namun secara persentase, kita perhatikan bahwa pasar kendaraan bekas merek Audi didominasi warna putih. Walau secara jumlah tidak sebanyak merek-merek yang disebut sebelumnya, namun peluang mendapatkan Audi warna putih sangat besar.     
+
+Dari aspek harga jual, kita bisa mendapatkan gambaran berikut. 
+
+```{r , results="hide"}
+usedCars_Euro_Wh2 <- usedCars_EuroJapan %>% 
+  filter(brand %in% euroCars) %>%
+  filter(age_Cat %in% c("Medium", "High")) %>%
+  group_by(brand) %>% 
+  summarise(white_mean = 
+               mean(if_else(color == "Putih", price, 0)),
+            non_white_mean = 
+               mean(if_else(color != "Putih", price, 0))) %>% 
+  arrange(desc(white_mean))
+  
+usedCars_Euro_Wh2
+```
+
+```{r}
+plot4 = usedCars_Euro_Wh2 %>% 
+   pivot_longer(cols = c(non_white_mean, white_mean)) %>%
+   ggplot(aes(x = value/1000000, y = fct_reorder(brand, value, max), fill = name)) +
+   geom_col(aes(fill = name)) +
+   labs(title ="Rata-rata Harga Kendaraan Bekas Eropa", 
+        subtitle = "Warna Non Putih vs Putih",
+        x = "Harga jual (dalam ribuan)", y = "Merek", 
+        fill = "Rata-rata Harga") +
+   facet_wrap(~name)
+
+plot4
+```
+
+## Kasus 3
+Bagaimana halnya dengan kendaraan Jepang dengan usia sama, yaitu kategori medium dan high, antara warna putih dan selain putih? Kita mencoba mencari jawabannya dari grafik yang akan dibangkitkan setelah filtrasi berikut.
+
+```{r}
+usedCars_Japan_White_NonWhite <- usedCars_EuroJapan %>% 
+  filter(brand %in% japaneseCars) %>%
+  filter(age_Cat %in% c("Medium", "High")) %>%
+  group_by(brand) %>% 
+  summarise(white_col = sum(color == "Putih"),
+            non_white_col = sum (color != "Putih")) %>% 
+  arrange(desc(white_col)) 
+  
+usedCars_Japan_White_NonWhite %>% head()
+```
+```{r}
+plot5 = usedCars_Japan_White_NonWhite %>% 
+   pivot_longer(cols = c(non_white_col, white_col)) %>%
+   ggplot(aes(x = value, y = brand)) +
+   geom_col(aes(fill = name), width = 0.8, position = "dodge") +
+   labs(title="Jumlah Kendaraan Bekas Jepang", subtitle="Warna Putih vs Non Putih, Usia >3 tahun", x = "Total", y = "Merek", fill = "Warna Kendaraan")
+
+plot5
+```
+
+Dari grafik terlihat bahwa ternyata kendaraan Jepang yang secara persentase mendominasi ditemukan pada merek Mitsubishi dan Mazda. Sementara pada merek-merek utama lainnya seperti Toyota, Honda, Daihatsu atau Suzuki. persentase banyak warna kendaraan putih tidaklah sebesar merek Mitsubishi dan Mazda. Dengan kata lain, calon pembeli mempunyai peluang lebih besar mendapatkan warna putih pada merek Mitsubishi dan Mazda. Namun bila dilihat dari jumlah kendaraan di pasaran maka kesimpulan tersebut tidak bersifat mutlak. Jelas terlihat bahwa populasi kendaraan bekas merek Toyota dan Honda jauh lebih besar dari Mazda. 
+
+Dari aspek harga jual, kita bisa mendapatkan gambaran berikut. 
+
+```{r , results="hide"}
+usedCars_Japan_Wh2 <- usedCars_EuroJapan %>% 
+  filter(brand %in% japaneseCars) %>%
+  filter(age_Cat %in% c("Medium", "High")) %>%
+  group_by(brand) %>% 
+  summarise(white_mean = 
+               mean(if_else(color == "Putih", price, 0)),
+            non_white_mean = 
+               mean(if_else(color != "Putih", price, 0))) %>% 
+  arrange(desc(white_mean))
+  
+usedCars_Japan_Wh2
+```
+
+```{r}
+plot6 = usedCars_Japan_Wh2 %>% 
+   pivot_longer(cols = c(non_white_mean, white_mean)) %>%
+   ggplot(aes(x = value/1000000, y = fct_reorder(brand, value, max), fill = name)) +
+   geom_col(aes(fill = name)) +
+   labs(title ="Rata-rata Harga Kendaraan Bekas Jepang", 
+        subtitle = "Warna Non Putih vs Putih",
+        x = "Harga jual (dalam ribuan)", y = "Merek", 
+        fill = "Rata-rata Harga") +
+   facet_wrap(~name)
+
+plot6
+
+```
+
+Menarik mengamati bahwa harga rata-rata untuk Lexus warna putih sebagai kendaraan premium malah lebih tinggi dari versi warna-warna lainnya. 
+
+## Kasus 4
+
+Dalam kasus sebelumnya tampak bahwa kendaraan bekas premium Jepang berwarna putih ditawarkan dengan harga tinggi. Apakah kasus ini serupa dengan kendaraan-kendaraan buatan Eropa yang berdasarkan observasi didominasi dengan warna hitam? 
+Untuk beberapa kendaraan premium, seperti Rolls Royce, warna putih bukanlah pilihan yang populer atau bisa juga warna tidak mempengaruhi harga jualnya. Dugaan warna hitam tetap menjadi pilihan utama untuk kendaraan premium seperti Rolls Royce ini. Namun bagaimana dengan gambaran secara umum kendaraan-kendaraan Eropa berkaitan dengan warna hitam? Apakah warna ini dominan dalam kelompok kendaraan berwarna selain putih? 
+Berikut pemeriksaan tentang fakta ketersediaan kendaraan Eropa warna hitam di pasaran.
+
+```{r , results="hide"}
+usedCars_Euro_nonWh <- usedCars_EuroJapan %>% 
+  filter(brand %in% euroCars & color != "Putih")
+total_nonWh = nrow(usedCars_Euro_nonWh)
+nbBlack = sum(usedCars_Euro_nonWh$color == "Hitam")
+nbBlack_perc = percent(nbBlack/total_nonWh, accuracy = 0.01, suffix = "%")
+nbBlack_perc
+```
+Dari perhitungan di atas tampak bahwa warna hitam mendominasi warna-warna selain putih dari kendaraan bekas baik kendaraan biasa maupun premium, yaitu sebesar 64,38%
+
+Bagaimana dengan rata-rata harga jual kendaraan Eropa warna hitam?
+
+```{r , results="hide"}
+usedCars_Euro_NonWh <- usedCars_EuroJapan %>% 
+  filter(brand %in% euroCars) %>%
+  filter(age_Cat %in% c("Medium", "High")) %>%
+  group_by(brand) %>% 
+  summarise(black_mean = 
+               mean(if_else(color == "Hitam", price, 0)),
+            non_black_mean = 
+               mean(if_else(color != "Putih" & color != "Hitam", price, 0))) %>% 
+  arrange(desc(black_mean))
+  
+usedCars_Euro_NonWh
+```
+Tampak bahwa dugaan kita bahwa beberapa kendaraan premium berwarna hitam khususnya Rolls  Royce, dan beberapa kendaraan lain seperti Bentley, Land Rover, Mercedes Benz, BMW serta Audi mempunyai harga rata-rata yang jauh lebih tinggi dari warna-warna lain selain hitam dan putih. Sedangkan beberapa kendaraan yang didesain sporty seperti Porsche, Aston Martin dan Maserati memiliki harga jual yang lebih tinggi untuk warna-warna selain hitam dan putih. Dalam kenyataannya kita bisa mengamati populasi kendaraan-kendaraan sporty dengan warna cerah. 
+
+# Kesimpulan
+
+Dengan mengamati faktor-faktor pada dataset harga jual kendaraan bekas yang ada, banyak hal bisa digali. Keempat kasus yang disajikan hanyalah sebagian pertanyaan yang jawabannya dicarikan melalui eksplorasi data dan grafik yang dibangkitkan. Sekalipun demikian jawaban yang diperoleh tidaklah suatu kemutlakan mengingat ada asumsi yang diperkenalkan disamping jawaban-jawaban tersebut diperoleh dengan menginterpretasi pemusatan data, sebaran nilai, sebaran frekuensi dan pencilan yang ada. Semoga apa yang telah disajikan ini dapat bermanfaat bagi pembaca.   
